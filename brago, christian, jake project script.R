@@ -1,19 +1,19 @@
-library(tidyverse)
 library(rpart)
 library(Metrics)
 library(caret)
 library(lubridate)
 library(corrplot)
+library(tidyverse)
 
 # reading in data ----
-data <- read.csv('data/raw/teaching_training_data.csv')
-cft <- read.csv('data/raw/teaching_training_data_cft.csv')
-com <- read.csv('data/raw/teaching_training_data_com.csv')
-grit <- read.csv('data/raw/teaching_training_data_grit.csv')
-num <- read.csv('data/raw/teaching_training_data_num.csv')
-opt <- read.csv('data/raw/teaching_training_data_opt.csv')
+data <- read.csv('teaching_training_data.csv')
+cft <- read.csv('teaching_training_data_cft.csv')
+com <- read.csv('teaching_training_data_com.csv')
+grit <- read.csv('teaching_training_data_grit.csv')
+num <- read.csv('teaching_training_data_num.csv')
+opt <- read.csv('teaching_training_data_opt.csv')
 
-# data cleaning ----
+# data cleaning for question 1 ----
 cft <- cft %>% 
   dplyr::select(unid, cft_score) %>% 
   distinct(unid, .keep_all = TRUE)
@@ -49,10 +49,10 @@ survey1 <- filter(data, survey_num == 1) %>%
   dplyr::select(-c(survey_date_month, job_start_date, job_leave_date, company_size, monthly_pay, financial_situation_now, financial_situation_5years))
 
 # response variable is 'working'
-summary(data$working) #F: 63409, T: 19861
-prop.table(table(data$working)) #F: 76%, T: 24%
+summary(survey1$working) #F: 40179, T: 11102
+prop.table(table(survey1$working)) #F: 78%, T: 22%
 
-# visualizations ----
+# visualizations for question 1----
 ggplot(survey1, aes(x= gender, fill= working)) + geom_bar(position= 'fill') +
   labs(x= 'Gender', y= 'Proportion', fill= 'Working')
 # significant because distributions are not the same
@@ -99,7 +99,7 @@ ggplot(survey1, aes(x= cft_score, fill= working)) + geom_bar() + facet_grid(work
   geom_vline(xintercept= working_cft_mean, color= 'green') +
   geom_vline(xintercept= not_working_cft_mean, color= 'blue') + 
   labs(x= 'CFT Score', y= 'Count', fill= 'Working')
-# mean cft score is slightly higher for working -> significant
+# mean cft score is slightly higher for working -> probably significant
 
 working_opt <- survey1 %>% filter(working == TRUE)
 working_opt_mean <- mean(working_opt$opt_score, na.rm= TRUE)
@@ -125,7 +125,7 @@ ggplot(survey1, aes(x= as.factor(fin_situ_now), fill= working)) + geom_bar(posit
   labs(x= 'Current Financial Situation', y= 'Proportion', fill= 'Working')
 # probably significant
 
-# modeling ----
+# modeling for question 1 ----
 # checking significance of explanatory variables
 gender_table <- table(survey1$gender, survey1$working)
 gender_chisq <- chisq.test(gender_table)
@@ -159,7 +159,57 @@ model <- train(as.factor(working) ~ gender + anyhhincome + givemoney_yes + fin_s
 model_accuracy <- mean(model$results$Accuracy)
 model_accuracy
 
-# things to do ----
-# predictions
-# confusion matrix
-# accuracy, specificity, sensitivity
+# THINGS TO DO FOR QUESTION 1 ----
+' 1. predictions
+  2. confusion matrix, accuracy, specificity, sensitivity'
+
+# data cleaning for question 2 ----
+# reordering monthly_pay 
+levels(data$monthly_pay) <- c("Zero", "R500 or less", "Between R501 and R1000", "Between R1001 and R2000", 
+                              "Between R2001 and 3000", "Between R3001 and R3500", "Between R3501 and R4000", 
+                              "Between R4001 and R6000", "Between R6001 and R8000", "Above R8000", "I prefer not to answer")
+
+# adding work length variable
+data <- data %>% mutate(job_start_date = as.Date(job_start_date),
+                        job_leave_date = as.Date(job_leave_date),
+                        survey_date_month = as.Date(survey_date_month))
+
+for(i in 1:nrow(data)){
+  if(data[i, 'working'] == TRUE & is.na(data[i, 'job_leave_date']))
+    data[i, 'job_leave_date'] <- data[i, 'survey_date_month']
+}
+
+data$work_length <- abs(interval(data$job_start_date, data$job_leave_date)/months(1))
+data$over_6mons <- data$work_length >= 6
+
+# response variable is 'over_6mons'
+summary(data$over_6mons) # F: 11728, T: 8673, NA: 62829
+prop.table(table(data$over_6mons)) # F: 57%, T: 43% (na's not included)
+
+# visualizations for variable 2 ----
+ggplot(data, aes(x= work_length)) + geom_histogram(binwidth= 5, fill= 'white', color= 'black')
+ggplot(data, aes(y= work_length)) + geom_boxplot()
+ggplot(data, aes(x= over_6mons)) + geom_bar()
+
+ggplot(data, aes(x= company_size, fill= over_6mons)) + geom_bar(position= 'fill')
+# maybe significant
+
+ggplot(data, aes(x= monthly_pay, fill= over_6mons))  + geom_bar(position= 'fill') + coord_flip()
+# significant
+
+ggplot(data, aes(x= age, y= work_length)) + geom_point()
+# not significant
+
+ggplot(data, aes(x= leadershiprole, fill= over_6mons)) + geom_bar(position= 'fill')
+# maybe significant
+
+ggplot(data, aes(x= province, fill= over_6mons)) + geom_bar(position= 'fill') + coord_flip()
+# maybe significant
+
+ggplot(data, aes(x= gender, fill= over_6mons)) + geom_bar(position= 'fill')
+# significant
+
+# THINGS TO DO FOR QUESTION 2 ----
+' 1. finish graphing variables that might be siginificant
+  2. perform chisq tests to confirm significance
+  3. create a model, test it, confusion matrix'

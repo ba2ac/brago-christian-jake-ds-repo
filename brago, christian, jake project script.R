@@ -128,20 +128,20 @@ ggplot(survey1, aes(x= as.factor(fin_situ_now), fill= working)) + geom_bar(posit
 # modeling for question 1 ----
 # checking significance of explanatory variables
 gender_table <- table(survey1$gender, survey1$working)
-gender_chisq <- chisq.test(gender_table)
-gender_chisq # significant
+chisq.test(gender_table) 
+# significant
 
 hhincome_table <- table(survey1$anyhhincome, survey1$working)
-hhincome_chisq <- chisq.test(hhincome_table)
-hhincome_chisq # significant
+chisq.test(hhincome_table) 
+# significant
 
 givemoney_table <- table(survey1$givemoney_yes, survey1$working)
-givemoney_chisq <- chisq.test(givemoney_table)
-givemoney_chisq # significant
+chisq.test(givemoney_table) 
+# significant
 
 fin_now_table <- table(survey1$fin_situ_now, survey1$working)
-fin_now_chisq <- chisq.test(fin_now_table)
-fin_now_chisq # significant
+chisq.test(fin_now_table) 
+# significant
 
 # splitting test and train
 train_index = sample(c(T, F), nrow(survey1), prob = c(0.8, 0.2), replace = TRUE)
@@ -156,12 +156,16 @@ model <- train(as.factor(working) ~ gender + anyhhincome + givemoney_yes + fin_s
                data= survey1_train, method= 'xgbTree', trControl= my_control, na.action= na.pass)
 
 # model accuracy
-model_accuracy <- mean(model$results$Accuracy)
-model_accuracy
+(model_accuracy <- mean(model$results$Accuracy))
+
+# predictions + confusion matrix
+predictions <- predict(model, survey1_test)
+
+confusions_matrix <- table(predictions, survey1_test$working) 
+# not working because the lengths are unequal. predictions has 4564, working has 10221
 
 # THINGS TO DO FOR QUESTION 1 ----
-' 1. predictions
-  2. confusion matrix, accuracy, specificity, sensitivity'
+' 1. confusion matrix, accuracy, specificity, sensitivity'
 
 # data cleaning for question 2 ----
 # reordering monthly_pay 
@@ -169,7 +173,10 @@ levels(data$monthly_pay) <- c("Zero", "R500 or less", "Between R501 and R1000", 
                               "Between R2001 and 3000", "Between R3001 and R3500", "Between R3501 and R4000", 
                               "Between R4001 and R6000", "Between R6001 and R8000", "Above R8000", "I prefer not to answer")
 
-# adding work length variable
+# removing repeated levels in numchildren
+levels(data$numchildren)[levels(data$numchildren) == "4more"] <- "4 or more"
+
+# adding work length and over_6mons variables
 data <- data %>% mutate(job_start_date = as.Date(job_start_date),
                         job_leave_date = as.Date(job_leave_date),
                         survey_date_month = as.Date(survey_date_month))
@@ -182,34 +189,102 @@ for(i in 1:nrow(data)){
 data$work_length <- abs(interval(data$job_start_date, data$job_leave_date)/months(1))
 data$over_6mons <- data$work_length >= 6
 
+# subsetting only those who are working at the time of the survey
+working <- filter(data, working == TRUE)
+
 # response variable is 'over_6mons'
-summary(data$over_6mons) # F: 11728, T: 8673, NA: 62829
-prop.table(table(data$over_6mons)) # F: 57%, T: 43% (na's not included)
+summary(working$over_6mons) # F: 8390, T: 7518, NA: 3952
+prop.table(table(working$over_6mons)) # F: 53%, T: 47% (na's not included)
 
-# visualizations for variable 2 ----
-ggplot(data, aes(x= work_length)) + geom_histogram(binwidth= 5, fill= 'white', color= 'black')
-ggplot(data, aes(y= work_length)) + geom_boxplot()
-ggplot(data, aes(x= over_6mons)) + geom_bar()
+# visualizations for question 2 ----
+ggplot(working, aes(x= work_length)) + geom_histogram(binwidth= 5, fill= 'white', color= 'black')
+ggplot(working, aes(y= work_length)) + geom_boxplot()
+# work length is heavily skewed
 
-ggplot(data, aes(x= company_size, fill= over_6mons)) + geom_bar(position= 'fill')
-# maybe significant
+ggplot(working, aes(x= over_6mons, fill= over_6mons)) + geom_bar()
 
-ggplot(data, aes(x= monthly_pay, fill= over_6mons))  + geom_bar(position= 'fill') + coord_flip()
-# significant
-
-ggplot(data, aes(x= age, y= work_length)) + geom_point()
+ggplot(working, aes(x= company_size, fill= over_6mons)) + geom_bar(position= 'fill')
 # not significant
 
-ggplot(data, aes(x= leadershiprole, fill= over_6mons)) + geom_bar(position= 'fill')
-# maybe significant
-
-ggplot(data, aes(x= province, fill= over_6mons)) + geom_bar(position= 'fill') + coord_flip()
-# maybe significant
-
-ggplot(data, aes(x= gender, fill= over_6mons)) + geom_bar(position= 'fill')
+ggplot(working, aes(x= monthly_pay, fill= over_6mons))  + geom_bar(position= 'fill') + coord_flip()
 # significant
 
+ggplot(working, aes(y= age, color= over_6mons)) + geom_boxplot()
+# not significant
+
+ggplot(working, aes(x= leadershiprole, fill= over_6mons)) + geom_bar(position= 'fill')
+# maybe significant
+
+ggplot(working, aes(x= province, fill= over_6mons)) + geom_bar(position= 'fill') + coord_flip()
+# significant
+
+ggplot(working, aes(x= gender, fill= over_6mons)) + geom_bar(position= 'fill')
+# significant
+
+ggplot(working, aes(x= as.factor(fin_situ_now), fill= over_6mons)) + geom_bar(position= 'fill')
+# maybe significant
+
+ggplot(working, aes(x= givemoney_yes, fill= over_6mons)) + geom_bar(position= 'fill')
+# maybe significant
+
+ggplot(working, aes(x= numchildren, fill= over_6mons)) + geom_bar(position= 'fill')
+# significant
+
+ggplot(working, aes(x= anyhhincome, fill= over_6mons)) + geom_bar(position= 'fill')
+# significant
+
+ggplot(working, aes(x= anygrant, fill= over_6mons)) + geom_bar(position= 'fill')
+# significant
+
+# modeling for question 2 ----
+# checking significance of explanatory variables
+pay_table <- table(working$monthly_pay, working$over_6mons)
+chisq.test(pay_table)
+# significant
+
+leadership_table <- table(working$leadershiprole, working$over_6mons)
+chisq.test(leadership_table)
+# not significant
+
+province_table <- table(working$province, working$over_6mons)
+chisq.test(province_table)
+# significant
+
+gender_table <- table(working$gender, working$over_6mons)
+chisq.test(gender_table)
+# not significant
+
+fin_table <- table(working$fin_situ_now, working$over_6mons)
+chisq.test(fin_table)
+# not significant
+
+money_table <- table(working$givemoney_yes, working$over_6mons)
+chisq.test(money_table)
+# significant
+
+children_table <- table(working$numchildren, working$over_6mons)
+chisq.test(children_table)
+# not significant
+
+hhincome_table <- table(working$anyhhincome, working$over_6mons)
+chisq.test(hhincome_table) 
+# significant
+
+grant_table <- table(working$anygrant, working$over_6mons)
+chisq.test(grant_table)
+# significant
+
+# splitting test and train
+train_index = sample(c(T, F), nrow(working), prob = c(0.8, 0.2), replace = TRUE)
+working_train <- working[train_index,]
+working_test <- working[!train_index,]
+
+# training first model
+model <- train(as.factor(over_6mons) ~ monthly_pay + anyhhincome + anygrant, data= working_train, 
+               method= 'glm', trControl= my_control, na.action= na.pass)
+
+model <- glm(over_6mons ~ monthly_pay + anyhhincome + anygrant, data= working_train, family= 'binomial')
+
+
 # THINGS TO DO FOR QUESTION 2 ----
-' 1. finish graphing variables that might be siginificant
-  2. perform chisq tests to confirm significance
-  3. create a model, test it, confusion matrix'
+' 1. create a model, test it, confusion matrix'

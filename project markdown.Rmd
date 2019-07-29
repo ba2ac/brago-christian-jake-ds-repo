@@ -1,0 +1,375 @@
+---
+title: "Final Project"
+author: "Brago Aboagye-Nyame, Christian Welch, Jake Tan"
+date: "7/28/2018"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r, echo= FALSE, warning=FALSE}
+# loading libaries ----
+library(caret)
+library(lubridate)
+library(corrplot)
+library(tidyverse)
+library(knitr)
+library(gridExtra)
+
+# reading in data ----
+data <- read.csv('teaching_training_data.csv')
+cft <- read.csv('teaching_training_data_cft.csv')
+com <- read.csv('teaching_training_data_com.csv')
+grit <- read.csv('teaching_training_data_grit.csv')
+num <- read.csv('teaching_training_data_num.csv')
+opt <- read.csv('teaching_training_data_opt.csv')
+```
+
+## Introduction
+The aim of this project was to create two models using data about individual's labor market status. The first model was to predict whether or not a person would be working at the time of their baseline survey and the second was to predict if the person would be working for at least six months. The variables in the data set include the person's gender, date of birth and province collected at the baseline survey and also scores from various tests including cft, which tests a person's fluid intelligence.
+
+## Data Cleaning for Model 1
+The first thing we decided to do to merge the different scores data with the original data frame so we had more variables for each individual. We noticed that there were some ids that were repeated in the dataframes so we dropped them and got rid of the index column. We feature engineered the current and future financial situation columns into more useable, numeric variables and also created two age variables.
+
+For the first question, we decided that the variables that were collected in the follow up surveys about a person's job information were not relevant to assessing whether they were working or not so we took them out of the data set and subsetted only the survey one responses. The response variable for this question is 'working' and its distribution can be seen on the next slide.
+```{r}
+# Drop index column; Remove duplicate columns based on unid
+cft <- cft %>% dplyr::select(unid, cft_score) %>% distinct(unid, .keep_all = TRUE)
+com <- com %>% dplyr::select(unid, com_score) %>% distinct(unid, .keep_all = TRUE)
+grit <- grit %>%  dplyr::select(unid, grit_score) %>% distinct(unid, .keep_all = TRUE)
+num <- num %>% dplyr::select(unid, num_score) %>% distinct(unid, .keep_all = TRUE)
+opt <- opt %>% dplyr::select(unid, opt_score) %>% distinct(unid, .keep_all = TRUE)
+
+# Change data for financial situation to numerical; mutate to derive predicted change in
+# financial situation within 5 years 
+# Feature engineering to get age of respondent based on date of birth; age at survey and
+# date of survey
+data <- data %>% 
+  mutate(fin_situ_now = parse_number(as.character(financial_situation_now))) %>% 
+  mutate(fin_situ_future = parse_number(as.character(financial_situation_5years))) %>% 
+  mutate(fin_situ_change = fin_situ_future - fin_situ_now) %>% 
+  mutate(age_at_survey = interval(dob, survey_date_month)/years(1)) %>% 
+  mutate(age = floor(age_at_survey))
+
+# merge scores data and combine with overall dataset
+df_assess <- full_join(cft, com, by ="unid")
+df_assess <- df_assess %>% 
+  full_join(grit, by ="unid") %>% 
+  full_join(num, by ="unid") %>% 
+  full_join(opt, by ="unid")
+data <- full_join(data, df_assess, by ="unid")
+
+# filter survey 1; remove column data that is not relevant to assessing whether they are
+# working after 4 months i.e first survey (Q1)
+survey1 <- filter(data, survey_num == 1) %>% 
+  dplyr::select(-c(survey_date_month, job_start_date, job_leave_date, company_size,
+                   monthly_pay, financial_situation_now, financial_situation_5years))
+```
+
+## Distribution of Working Variable
+```{r, echo= TRUE}
+# Number of working/ not working
+kable(list(table(survey1$working)))
+
+# Proportion of working/ not working
+kable(list(prop.table(table(survey1$working))))
+```
+
+## Visualizations for Model 1
+In order to narrow down which of the variables to include in the model, we graphed them based on working and compared their distributions. We chose to graph proportions rather than count so the numbers would be comparable.
+```{r fig.width=8}
+# Bar chart comparing the distribution of working/non-working based on genders 
+# Calculate number of NA in gender -> 23 - as it is very insignificant as compared to
+# over 50000 rows of data, we opted to omit the rows with NA gender to have a more clear
+# illustration of employment situation across gender
+survey1_gender <- dplyr::select(survey1, gender)
+num_na <- sum(is.na(survey1_gender$gender))
+survey1_removeNAgender <- filter(survey1, !is.na(gender))
+gender <- ggplot(survey1_removeNAgender, aes(x= gender, fill= working)) + 
+  geom_bar(position= 'fill') + labs(x= 'Gender', y= 'Proportion') +
+  theme(legend.position= 'bottom')
+# significant because distributions across genders are not the same
+
+# Bar chart comparing the distribution of working/non-working based on province 
+province <- ggplot(survey1, aes(x= province, fill= working)) + 
+  geom_bar(position= 'fill') + coord_flip() + labs(x= 'Province', y= 'Proportion') +
+  theme(legend.position= 'none')
+# maybe significant but there are too many NA to draw accurate insights 
+
+grid.arrange(gender, province, ncol= 2)
+```
+
+## Visualizations for Model 1
+In the following graphs, we changed all the NA values to No/ False under the assumption that any person who would answer Yes/ True would have given an answer instead of leaving it blank.
+```{r fig.width=8}
+# Bar chart comparing the distribution of working/non-working based on volunteer 
+survey1$volunteer <- as.character(survey1$volunteer)
+survey1$volunteer[is.na(survey1$volunteer)] <- "No"
+vol <- ggplot(survey1, aes(x= volunteer, fill= working)) + geom_bar(position= 'fill') +
+  labs(x= 'Volunteer', y= 'Proportion') + theme(legend.position= 'none')
+# probably not as significant because they are similar
+
+# Bar chart comparing the distribution of working/non-working based on leadership roles 
+survey1$leadershiprole <- as.character(survey1$leadershiprole)
+survey1$leadershiprole[is.na(survey1$leadershiprole)] <- "No"
+lead <- ggplot(survey1, aes(x= leadershiprole, fill= working)) +
+  geom_bar(position= 'fill') + labs(x= 'Leadership Role', y= 'Proportion') +
+  theme(legend.position= 'none')
+# probably not as significant because they are similar
+
+grid.arrange(vol, lead, ncol= 2)
+```
+
+## Visualizations for Model 1
+```{r fig.width=8}
+# Bar chart comparing the distribution of working/ non-working based on if they received
+# grants
+survey1$anygrant <- as.character(survey1$anygrant)
+survey1$anygrant[is.na(survey1$anygrant)] <- "FALSE"
+grant <- ggplot(survey1, aes(x= anygrant, fill= working)) + geom_bar(position= 'fill') +
+  labs(x= 'Receive Grant', y= 'Proportion') + theme(legend.position= 'none')
+# probably not significant because they are similar
+
+# Bar chart comparing the distribution of working/ non-working based on if others in the
+# household have an income
+survey1$anyhhincome <- as.character(survey1$anyhhincome)
+survey1$anyhhincome[is.na(survey1$anyhhincome)] <- "FALSE"
+income <- ggplot(survey1, aes(x= anyhhincome, fill= working)) +
+  geom_bar(position= 'fill') + labs(x= 'Other Household Income', y= 'Proportion') +
+  theme(legend.position= 'none')
+# maybe significant
+
+# Bar chart comparing the distribution of working/ non-working based on if they give money to others
+survey1$givemoney_yes <- as.character(survey1$givemoney_yes)
+survey1$givemoney_yes[is.na(survey1$givemoney_yes)] <- "FALSE"
+money <- ggplot(survey1, aes(x= givemoney_yes, fill= working)) + 
+  geom_bar(position= 'fill') + labs(x= 'Give Money to Others', y= 'Proportion') +
+  theme(legend.position= 'none')
+# maybe significant
+
+grid.arrange(grant, income, money, ncol= 3)
+```
+
+## Visualizations for Model 1
+```{r fig.width=8, warning= FALSE}
+# Histogram of age split by if the person is working or not
+age <- ggplot(survey1, aes(x= age, fill= working)) + geom_bar() + facet_grid(working~.) +
+  xlim(15, 35) +
+  geom_vline(xintercept= mean(filter(survey1, working== TRUE)$age, na.rm=TRUE), 
+             color= 'black') +
+  geom_vline(xintercept= mean(filter(survey1, working== FALSE)$age, na.rm=TRUE), 
+             color= 'blue') + 
+  labs(x= 'Age', y= 'Count') + theme(legend.position= 'none')
+# not significant because distributions look to be about the same 
+
+# Bar chart comparing the distribution of working/ not working based on their current financial situation
+fin <- ggplot(survey1, aes(x= as.factor(fin_situ_now), fill= working)) +
+  geom_bar(position= 'fill') + labs(x= 'Current Financial Situation', y= 'Proportion') +
+  theme(legend.position= 'none')
+# probably significant
+
+grid.arrange(age, fin, ncol= 2)
+```
+
+## Visualizing Scores Data
+```{r}
+# Correlation plot for scores data
+scores_data <- dplyr::select(survey1, cft_score:opt_score)
+corrplot(cor(scores_data, use= "pairwise.complete.obs"), method = "square")
+# cft, com, num are pairwise highly correlated so probably only need one
+```
+From this, we can see that CFT, COM, and NUM scores were pairwise highly correlated so we decided to only include CFT in the model.
+
+## Scores Data
+```{r fig.width=8, warning=FALSE, echo=TRUE}
+# Distribution of CFT scores
+tapply(survey1$cft_score, survey1$working, mean, na.rm= T)
+
+# Distribution of OPT scores
+tapply(survey1$opt_score, survey1$working, mean, na.rm= T)
+
+# Distribution of GRIT scores
+tapply(survey1$grit_score, survey1$working, mean, na.rm= T)
+```
+
+## Modeling for Model 1
+To test the significance of the variables that were previously graphed, we ran tests for significance on all of them. We chose a Pearson's Chi-Squared test for signficance on all of the factor variables and a two sample T-Test for the numerical ones. After doing so, we found that all of them were significant enough to potentially be included in the model except OPT and GRIT scores.
+
+Potential model formula:
+
+working ~ gender + province + volunteer + leadershiprole + anygrant + anyhhincome + givemoney_yes + fin_situ_now + age + cft_score
+
+Potential model types: XG Boost Tree, Logistic Regression
+```{r, include=FALSE}
+# checking significance of explanatory variables
+gender_table <- table(survey1$gender, survey1$working)
+chisq.test(gender_table) 
+# significant
+
+province_table <- table(survey1$province, survey1$working)
+chisq.test(province_table)
+# significant
+
+volunteer_table <- table(survey1$volunteer, survey1$working)
+chisq.test(volunteer_table)
+# significant
+
+leadership_table <- table(survey1$leadershiprole, survey1$working)
+chisq.test(leadership_table)
+# significant
+
+grant_table <- table(survey1$anygrant, survey1$working)
+chisq.test(grant_table)
+# significant
+
+hhincome_table <- table(survey1$anyhhincome, survey1$working)
+chisq.test(hhincome_table) 
+# significant
+
+givemoney_table <- table(survey1$givemoney_yes, survey1$working)
+chisq.test(givemoney_table) 
+# significant
+
+fin_now_table <- table(survey1$fin_situ_now, survey1$working)
+chisq.test(fin_now_table) 
+# significant
+
+working_age <- survey1 %>% filter(working == TRUE) %>% pull(age)
+not_working_age <- survey1 %>% filter(working == FALSE) %>% pull(age)
+t.test(working_age, not_working_age)
+# significant
+
+working_cft <- survey1 %>% filter(working == TRUE) %>% pull(cft_score)
+not_working_cft <- survey1 %>% filter(working == FALSE) %>% pull(cft_score)
+t.test(working_cft, not_working_cft)
+# significant
+
+working_opt <- survey1 %>% filter(working == TRUE) %>% pull(opt_score)
+not_working_opt <- survey1 %>% filter(working == FALSE) %>% pull(opt_score)
+t.test(working_opt, not_working_opt)
+# not significant
+
+working_grit <- survey1 %>% filter(working == TRUE) %>% pull(grit_score)
+not_working_grit <- survey1 %>% filter(working == FALSE) %>% pull(grit_score)
+t.test(working_grit, not_working_grit)
+# not significant
+```
+
+## Modeling for Model 1
+``` {r}
+# splitting test and train
+train_index = sample(c(T, F), nrow(survey1), prob = c(0.8, 0.2), replace = TRUE)
+survey1_train <- survey1[train_index,]
+survey1_test <- survey1[!train_index,]
+
+# setting train control
+my_control <- trainControl(method = "cv", number = 5, savePredictions = "final",
+                           allowParallel = TRUE, verboseIter= FALSE)
+
+# training models
+model1 <- train(as.factor(working) ~ gender + province + volunteer + leadershiprole +
+                  anygrant + anyhhincome + givemoney_yes + fin_situ_now + age + cft_score,
+                data= survey1_train, method= 'xgbTree', trControl= my_control, 
+                na.action= na.pass)
+
+model2 <- train(as.factor(working) ~ gender + province + volunteer + leadershiprole +
+                  anygrant + anyhhincome + givemoney_yes + fin_situ_now + age + cft_score,
+                data= survey1_train, method= 'glm', trControl= my_control, 
+                na.action= na.pass)
+```
+
+```{r, echo=TRUE}
+# model accuracy
+data.frame('XGBTree'= mean(model1$results$Accuracy), 'GLM'= mean(model2$results$Accuracy))
+```
+Comparing the two models, we can see that the XGBTree model has a better average accuracy so that model will most likely be the one used for predictions. Looking at the summary for model2, we can see that most of the levels for province as well as leadershiprole and anyhhincome are not very significant so we took those variables out of the model.
+
+```{r}
+summary(model2)
+```
+
+## Updating Models
+```{r}
+# training models
+model1 <- train(as.factor(working) ~ gender + volunteer + anygrant + givemoney_yes +
+                  fin_situ_now + age + cft_score, data= survey1_train, method= 'xgbTree',
+                trControl= my_control, na.action= na.pass)
+
+model2 <- train(as.factor(working) ~ gender + volunteer + anygrant + givemoney_yes +
+                  fin_situ_now + age + cft_score, data= survey1_train, method= 'glm',
+                trControl= my_control, na.action= na.pass)
+```
+
+```{r, echo=TRUE}
+# model accuracy
+data.frame('XGBTree'= mean(model1$results$Accuracy), 'GLM'= mean(model2$results$Accuracy))
+```
+After these updates, the average accuracy for the first model stays about the same but the second model's average accuracy increases by about four percent. Looking at the model2 summary again, we can see that volunteer and anygrant are no longer significant so we will take those out of the final model.
+```{r}
+summary(model2)
+```
+
+## Updating Models Again
+```{r}
+# training models
+model1 <- train(as.factor(working) ~ gender + givemoney_yes + fin_situ_now + age +
+                  cft_score, data= survey1_train, method= 'xgbTree', 
+                trControl= my_control, na.action= na.pass)
+
+model2 <- train(as.factor(working) ~ gender + givemoney_yes + fin_situ_now + age +
+                  cft_score, data= survey1_train, method= 'glm', 
+                trControl= my_control, na.action= na.pass)
+```
+
+```{r, echo=TRUE}
+# model accuracy
+data.frame('XGBTree'= mean(model1$results$Accuracy), 'GLM'= mean(model2$results$Accuracy))
+```
+After these updates, we can see that the average accuracies for both models are about the same. However, looking at the summary for the second model, all of the variables are now significant so we now have our final models. Since the XGBTree model has the better average accuracy, that will be the one that we use for predictions.
+
+```{r}
+summary(model2)
+```
+
+## Predictions + Confusion matrix
+```{r}
+predictions <- predict(model1, survey1_test)
+
+# confusions_matrix <- table(predictions, survey1_test$working)
+length(predictions)
+length(survey1_test$working)
+```
+We were able to make predictions using the first model and test set. However, when we tried to make the confusion matrix, we ran into an error that the arguments were not the same length. After some exploration, we found that we had about 4591 predictions while the test set had about 10301 observations. We concluded that since we used na.pass in the train control, the model skipped over any observations that had NA in one of the variables used to predict. 
+
+## Debugging Confusion Matrix Error
+In order to combat this, we attempted to filter the test data set to include just the observations that were complete with regards to the explantory variables and were able to construct a confusion matrix.
+```{r}
+# filter NAs in explanatory variables
+survey1_test_sub <- survey1_test %>% filter(!is.na(gender)) %>%
+  filter(!is.na(givemoney_yes)) %>% filter(!is.na(cft_score)) %>% 
+  filter(!is.na(fin_situ_now)) %>% filter(!is.na(age))
+
+# confusion matrix
+confusion_matrix <- table(predictions, survey1_test_sub$working)
+kable(list(confusion_matrix))
+
+# model metrics
+model_accuracy <- (confusion_matrix[1, 1] + confusion_matrix[2, 2]) /
+  sum(confusion_matrix)
+model_sensitivity <- confusion_matrix[2, 2] / (confusion_matrix[2, 2] +
+                                                 confusion_matrix[2, 1])
+model_specificity <- confusion_matrix[1, 1] / (confusion_matrix[1, 1] +
+                                                 confusion_matrix[1, 2])
+
+data.frame('accuracy'= model_accuracy, 'sensitivity'= model_sensitivity, 
+           'specificity'= model_specificity)
+```
+
+## Conclusions and Insights
+Using this model, we can conclude that age, gender, current financial situation, cft score and whether or not a person gives money to others are some of the most significant variables to take into account when trying to predict whether or not a person is likely to be working or not.
+
+Age and gender were the most significant variables of the five variables so as for interventions, different measures should be taken for those of different genders and of different ages. Males were more likely to be employed than females and the older a person was, the greater their likelihood of being employed. We also found that the higher a person's cft score, the more likely they were to be employed so one measure that can be taken to combat unemployment could be to improve people's fluid intelligence. 
+
+The last two findings we discovered were that someone having a better current financial situation and having to give money to others were strong indicators that the person was employed. Intuitively, this makes sense because being financially stable and being able to provide for others could potentially be consequences rather than reasons why someone is employed.
